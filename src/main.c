@@ -41,8 +41,8 @@ void init_ph_frPWM()  {
   DDRB |= (1 << PB5); // pin 11
   TCCR1A |= (1 << COM1A1);  // Clear OC1A on Compare Match when up-counting. Set OC1A on Compare Match when down-counting
   TCCR1B |= (1 << CS11) | (1 << WGM13); // prescaling by 8
-  ICR1 = 204; // top value then OC1A pin can be used // 8bit top value
-  OCR1A = 102;  // 50 duty cycle
+  ICR1 = 20000; // top value then OC1A pin can be used // 8bit top value
+  OCR1A = 1500;  // 50 duty cycle
 }
 
 
@@ -51,16 +51,35 @@ int main(void) {
   
   init_ADC();
   init_timer0();
-  I2C_Init(); 
+  I2C_Init();
+  clear_display();
   InitializeDisplay();
-    
+  
   sei();
     
   while (1) {
-      for(uint8_t i = 0; i < 4; i++) {
-          sprintf(buffer, "Kanal %d: %4d", i, joystick_values[i]);     
-          sendStrXY(buffer, i + 2, 0);
-      }
-      _delay_ms(50); // Opdater ca. 20 gange i sekundet
+    static int16_t smooth_values[4] = {512, 512, 512, 512}; 
+
+    for(uint8_t i = 0; i < 4; i++) {
+      // 2. Atomic read: copy the volatile value safely
+      cli();
+      int16_t raw_joy = joystick_values[i]; 
+      sei();
+
+    if (raw_joy > 524) {
+        smooth_values[i] += (raw_joy - 512) / 64;
+    } else if (raw_joy < 500) {
+        smooth_values[i] -= (512 - raw_joy) / 64;
+    }
+    if (smooth_values[i] > 1023) smooth_values[i] = 1023;
+    if (smooth_values[i] < 0)    smooth_values[i] = 0;
+
+    }
+
+    for(uint8_t i = 0; i < 4; i++) {
+        sprintf(buffer, "Kanal %d: %4d", i, smooth_values[i]);     
+        sendStrXY(buffer, i + 2, 0);
+    }
+    _delay_ms(50); // Opdater ca. 20 gange i sekundet
   }
 }
