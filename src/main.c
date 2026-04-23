@@ -23,7 +23,7 @@ void init_timer0() {
 }
 
 ISR(TIMER0_COMPA_vect)  { // starter sampling
-  ADMUX = (1 << REFS0) | (current_ch & 0x07); // Vælg den aktuelle kanal i ADMUX (bevar REFS0) 
+  // ADMUX = (1 << REFS0) | (current_ch & 0x07); // Vælg den aktuelle kanal i ADMUX (bevar REFS0) 
   ADCSRA |= (1 << ADSC);  // Start konvertering (Sæt ADSC bit)
 }
 
@@ -32,10 +32,19 @@ ISR(ADC_vect) { // henter resultat fra sampling
   joystick_values[current_ch] = ADC;
 
   current_ch++;
-  if (current_ch > 3) {
-    current_ch = 0;
-  }
+  if (current_ch > 3) current_ch = 0;
+
+  ADMUX = (1 << REFS0) | (current_ch & 0x07);
 }
+
+void init_ph_frPWM()  {
+  DDRB |= (1 << PB5); // pin 11
+  TCCR1A |= (1 << COM1A1);  // Clear OC1A on Compare Match when up-counting. Set OC1A on Compare Match when down-counting
+  TCCR1B |= (1 << CS11) | (1 << WGM13); // prescaling by 8
+  ICR1 = 204; // top value then OC1A pin can be used // 8bit top value
+  OCR1A = 102;  // 50 duty cycle
+}
+
 
 int main(void) {
   char buffer[20];
