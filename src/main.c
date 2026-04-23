@@ -38,15 +38,16 @@ ISR(ADC_vect) { // henter resultat fra sampling
 }
 
 void init_ph_frPWM()  {
-  DDRB |= (1 << PB5); // pin 11
+  DDRB |= (1 << PB5); // enable output på pin 11
   TCCR1A |= (1 << COM1A1);  // Clear OC1A on Compare Match when up-counting. Set OC1A on Compare Match when down-counting
   TCCR1B |= (1 << CS11) | (1 << WGM13); // prescaling by 8
   ICR1 = 20000; // top value then OC1A pin can be used // 8bit top value
-  OCR1A = 1500;  // 50 duty cycle
-}
+  OCR1A = 1500;  // 50 duty cycle (er det ikke 7,5%?)
+  TCNT1 = 0; //Sikrer os at tælleren starter fra 0
+};
 
-
-int main(void) {
+int main(void)
+{
   char buffer[20];
   
   init_ADC();
@@ -58,28 +59,46 @@ int main(void) {
   sei();
     
   while (1) {
-    static int16_t smooth_values[4] = {512, 512, 512, 512}; 
 
-    for(uint8_t i = 0; i < 4; i++) {
-      // 2. Atomic read: copy the volatile value safely
-      cli();
-      int16_t raw_joy = joystick_values[i]; 
-      sei();
-
-    if (raw_joy > 524) {
-        smooth_values[i] += (raw_joy - 512) / 64;
-    } else if (raw_joy < 500) {
-        smooth_values[i] -= (512 - raw_joy) / 64;
+    //PWM test sweep:
+    for (uint16_t position = 1500; position <= 2500; position += 10){ // sweep op
+    OCR1A = position;
+      _delay_ms(20); //venter en fuld pwm period
+    }   
+    for (uint16_t position = 2500; position >= 500; position -= 10) //sweep helt ned
+    {
+      OCR1A = position;
+      _delay_ms(20); // venter en fuld pwm period
+    } 
+    for (uint16_t position = 500; position <= 1500; position += 10) // sweep tilbage i midten
+    {
+      OCR1A = position;
+      _delay_ms(20); // venter en fuld pwm period
     }
-    if (smooth_values[i] > 1023) smooth_values[i] = 1023;
-    if (smooth_values[i] < 0)    smooth_values[i] = 0;
 
-    }
+   // // Smooth joystick part:
+   // static int16_t smooth_values[4] = {512, 512, 512, 512}; 
+//
+   // for(uint8_t i = 0; i < 4; i++) {
+   //   // 2. Atomic read: copy the volatile value safely
+   //   cli();
+   //   int16_t raw_joy = joystick_values[i]; 
+   //   sei();
+//
+   // if (raw_joy > 524) {
+   //     smooth_values[i] += (raw_joy - 512) / 64;
+   // } else if (raw_joy < 500) {
+   //     smooth_values[i] -= (512 - raw_joy) / 64;
+   // }
+   // if (smooth_values[i] > 1023) smooth_values[i] = 1023;
+   // if (smooth_values[i] < 0)    smooth_values[i] = 0;
+//
+   // }
 
-    for(uint8_t i = 0; i < 4; i++) {
-        sprintf(buffer, "Kanal %d: %4d", i, smooth_values[i]);     
-        sendStrXY(buffer, i + 2, 0);
-    }
-    _delay_ms(50); // Opdater ca. 20 gange i sekundet
+  //  for(uint8_t i = 0; i < 4; i++) {
+  //      sprintf(buffer, "Kanal %d: %4d", i, smooth_values[i]);     
+  //      sendStrXY(buffer, i + 2, 0);
+  //  }
+  //  _delay_ms(50); // Opdater ca. 20 gange i sekundet
   }
 }
