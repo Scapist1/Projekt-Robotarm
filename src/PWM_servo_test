@@ -1,0 +1,115 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <stdio.h>
+#include "ssd1306.h"
+#include "I2C.h"
+#define SERVO_MAX 2500
+#define SERVO_MIN 500
+#define SERVO_MID 1500
+#define SERVO_MAX_SPEED 5 // må vi lige eksperimentere med. Jo højere værdi jo hurtigere.
+#define JOY_CENTER 512
+#define JOY_DEADZONE 10 // så ikke den drifter eller bevæger armen når den burde være i midten.
+
+volatile uint16_t joystick_values[4]; // A0, A1, A2 og A3 værdier
+volatile uint8_t current_ch = 0;
+volatile uint16_t servo_position[4] = {SERVO_MID, SERVO_MID, SERVO_MID, SERVO_MID};
+
+void init_ADC()
+{
+    ADMUX = (1 << REFS0);                                 // Reference spænding sat til 5V (AVCC) ("=" sætter REFS0 bit høj og resten lavt)
+    ADCSRA |= (1 << ADEN) | (1 << ADIE);                  // enable ADC and enable interrupt adc complete
+    ADCSRA |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Scaling 16 Mhz to 125 kHz ADC clock frequency with prescaler 128
+    DIDR0 = 0xFF;                                         // Deaktiverer alle digitale input A0-A7 for at spare på strømmen
+}
+
+void init_timer0()
+{
+    TCCR0A = (1 << WGM01);              // Sæt Timer0 til CTC mode
+    OCR0A = 155;                        // Sæt sammenligningsværdi (OCR0A) med prescaler 1024: (16MHz / 1024) / 156 ≈ 100 Hz (10ms mellem samples)
+    TIMSK0 = (1 << OCIE0A);             // Enable Timer Compare Interrupt
+    TCCR0B = (1 << CS02) | (1 << CS00); // Start timer med prescaler 1024
+}
+
+void init_ph_frPWM()
+{
+    DDRB |= (1 << PB5);                   // enable output på pin 11
+    TCCR1A |= (1 << COM1A1);              // Clear OC1A on Compare Match when up-counting. Set OC1A on Compare Match when down-counting
+    TCCR1B |= (1 << CS11) | (1 << WGM13); // prescaling by 8
+    ICR1 = 20000;                         // top value then OC1A pin can be used // 8bit top value
+    OCR1A = SERVO_MID;                    // 50 duty cycle (er det ikke 7,5%?)
+    TCNT1 = 0;                            // Sikrer os at tælleren starter fra 0
+};
+
+ISR(TIMER0_COMPA_vect)
+{ // starter sampling
+    // ADMUX = (1 << REFS0) | (current_ch & 0x07); // Vælg den aktuelle kanal i ADMUX (bevar REFS0)
+    ADCSRA |= (1 << ADSC); // Start konvertering (Sæt ADSC bit)
+    cli();
+    int16_t raw_joy_test = joystick_values[0]; // Kode tyvstjålet nede fra ADC koden, men kun til ét joystick bare lige til en start som test.
+    sei();
+    int16_t afvigelse = raw_joy_test - JOY_CENTER;
+
+    if (afvigelse < JOY_DEADZONE && afvigelse > -JOY_DEADZONE)
+    { // gør at den ikke drifter (forsøger i hvert fald)
+        afvigelse = 0;
+    }
+    int16_t step = afvigelse * SERVO_MAX_SPEED / 512; // så jo højere afvigelse jo hurtigere bevæger motoren sig.
+    int16_t new_position = servo_position[0] + step;
+
+    servo_position[0] = new_position;
+
+    if (new_position > SERVO_MAX)
+        new_position = SERVO_MAX;
+    if (new_position < SERVO_MIN)
+        new_position = SERVO_MIN;
+
+    OCR1A = servo_position[0]; // pwm output pin
+}
+
+ISR(ADC_vect)
+{ // henter resultat fra sampling
+
+    joystick_values[current_ch] = ADC;
+
+    current_ch++;
+    if (current_ch > 3)
+        current_ch = 0;
+
+    ADMUX = (1 << REFS0) | (current_ch & 0x07);
+}
+
+int main(void)
+{
+    char buffer[20];
+
+    init_ADC();
+    init_timer0();
+    I2C_Init();
+    init_ph_frPWM();
+    clear_display();
+    InitializeDisplay();
+
+    sei();
+
+    while (1)
+    {
+        cli();
+        int16_t joystick_display = (int16_t)joystick_values[0]; // kun det ene joystick værdi til test
+        int16_t position_display = servo_position[0];
+        sei();
+
+        sprintf(buffer, "Kanal 0: %4d", joystick_display);
+        sendStrXY(buffer, 2, 0);
+
+        sprintf(buffer, "Servo 0: %4d", position_display);
+        sendStrXY(buffer, 4, 0);
+
+        uint16_t duty = position_display * 100 / 20000;
+        sprintf(buffer, "Duty: %3d%%", duty); // viser bare positionen i % duty cycle i stedet for i tal som ovenover
+        sendStrXY(buffer, 5, 0);
+
+        uint16_t speed = (joystick_values[0] - JOY_CENTER) * SERVO_MAX_SPEED / 512; //ikke rigtigt sikker på om det her kommer til at virke tbh hehe
+        sprintf(buffer, "Speed: %2d", speed);
+    }
+}
